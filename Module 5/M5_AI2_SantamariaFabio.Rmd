@@ -1,0 +1,516 @@
+---
+title: "M5_AI1_SantamariaFabio"
+author: "Fabio Santamaría"
+date: "17/5/2021"
+urlcolor: blue
+output:
+  word_document:  default
+  pdf_document:   default
+  epuRate::epurate:
+    toc:             TRUE
+    number_sections: FALSE
+    code_folding:    "show"
+  html_document: 
+    theme:        cosmo 
+    highlight:    tango 
+    toc:          true
+    toc_float:    true
+    code_folding: show
+---
+
+<style>
+body {
+text-align: justify}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+source("Functions.R")
+library(glmnet)
+library(dplyr)
+library(tidyr)
+```
+
+# Descripción de la tarea: 
+
+Partimos de los datos de credit scoring de una entidad bancaria con los siguientes atributos:
+
+- Attribute 1: (qualitative) Status of existing checking account
+
+A11 : ... < 0 DM
+
+A12 : 0 <= ... < 200 DM
+
+A13 : ... >= 200 DM / salary assignments for at least 1 year
+
+A14 : no checking account
+
+- Attribute 2: (numerical)
+
+Duration in month
+
+- Attribute 3: (qualitative) Credit history
+
+A30 : no credits taken/ all credits paid back duly
+
+A31 : all credits at this bank paid back duly
+
+A32 : existing credits paid back duly till now
+
+A33 : delay in paying off in the past
+
+A34 : critical account/ other credits existing (not at this bank)
+
+- Attribute 4: (qualitative) Purpose
+
+A40 : car (new)
+
+A41 : car (used)
+
+A42 : furniture/equipment
+
+A43 : radio/television
+
+A44 : domestic appliances
+
+A45 : repairs
+
+A46 : education
+
+A47 : (vacation - does not exist?)
+
+A48 : retraining
+
+A49 : business
+
+A410 : others
+
+- Attribute 5: (numerical) Credit amount
+
+- Attibute 6: (qualitative) Savings account/bonds
+
+A61 : ... < 100 DM
+
+A62 : 100 <= ... < 500 DM
+
+A63 : 500 <= ... < 1000 DM
+
+A64 : .. >= 1000 DM
+
+A65 : unknown/ no savings account
+
+- Attribute 7: (qualitative) Present employment since
+
+A71 : unemployed
+
+A72 : ... < 1 year
+
+A73 : 1 <= ... < 4 years
+
+A74 : 4 <= ... < 7 years
+
+A75 : .. >= 7 years
+
+- Attribute 8: (numerical) Installment rate in percentage of disposable income
+
+- Attribute 9: (qualitative) Personal status and sex
+
+A91 : male : divorced/separated
+
+A92 : female : divorced/separated/married
+
+A93 : male : single
+
+A94 : male : married/widowed
+
+A95 : female : single
+
+Attribute 10: (qualitative) Other debtors / guarantors
+
+A101 : none
+
+A103 : guarantor
+
+Attribute 11: (numerical) Present residence since
+
+Attribute 12: (qualitative) Property
+
+A121 : real estate
+
+A122 : if not A121 : building society savings agreement/ life insurance
+
+A123 : if not A121/A122 : car or other, not in attribute 6
+
+A124 : unknown / no property
+
+Attribute 13: (numerical) Age in years
+
+Attribute 14: (qualitative) Other installment plans
+
+A141 : bank
+
+A142 : stores
+
+A143 : none
+
+Attribute 15: (qualitative) Housing
+
+A151 : rent
+
+A152 : own
+
+A153 : for free
+
+
+Attribute 16: (numerical) Number of existing credits at this bank
+
+Attribute 17: (qualitative) Job
+
+A171 : unemployed/ unskilled - non-resident
+
+A172 : unskilled - resident
+
+A173 : skilled employee / official
+
+A174 : management/ self-employed/highly qualified employee/ officer
+
+Attribute 18: (numerical) Number of people being liable to provide maintenance for
+
+Attribute 19: (qualitative) Telephone
+
+A191 : none
+
+A192 : yes, registered under the customers name
+
+Attribute 20: (qualitative) foreign worker
+
+A201 : yes
+
+A202 : no
+
+```{r}
+german_credit <- read.table("http://archive.ics.uci.edu/ml/machine-learning-databases/statlog/german/german.data")
+colnames(german_credit)<-c("chk_acct","duration","credit_his","purpose","amount","saving_acct","present_emp","installment_rate","sex","other_debtor","present_resid","property","age","other_install","housing","n_credits","job","n_people","telephone","foreign","response")
+german_credit$response <- german_credit$response - 1
+german_credit$response <- as.factor(german_credit$response)
+
+head(german_credit)
+```
+
+# 1. Propón un modelo lineal logit en el que la variable respuesta (crédito bueno=0, crédito malo=1), lo expliquen el resto de variables. 
+
+
+Se nos pide un modelo que explique la variable respuesta en base al resto de variables. Como la variable respuesta es dicotómica estamos ante un problema de clasificación, donde el valor crédito bueno se representa con el 0 y crédito malo con 1.
+
+Uno de los posibles modelos para resolver este tipo de problemas es la regresión logística binomial, o *logit* binomial,
+
+${\displaystyle logit(p)=\log {\frac {p}{1-p}}=\beta _{0}+\beta _{1}x_{1}+\beta _{2}x_{2}+\cdots +\beta _{m}x_{m}}$
+
+en donde $p$ es la probabilidad de que la variable dependiente que se quiere explicar tome el valor 1. Podemos usar este modelo como clasificador, fijando un valor de corte para $p$ a partir del cual consideramos que el modelo predice un 1 o un 0.
+
+Empezamos definiendo la fórmula completa y creando un modelo *logit* a partir del modelo lineal general usando *logit* como función link:
+
+```{r}
+formular_completa <- as.formula("response~chk_acct+duration+credit_his+purpose+amount+saving_acct+present_emp+installment_rate+sex+other_debtor+present_resid+property+age+other_install+housing+n_credits+job+n_people+telephone+foreign")
+
+modelo_logit<-glm(response~., data=german_credit, family=binomial(link="logit"))
+
+summary(modelo_logit)
+```
+
+Para validar nuestro modelo analizaremos la distribución de los residuos; calcularemos la devianza, la cual nos permitirá comparar el modelo con otros; obtendremos el área bajo la curva ROC así como la distribución de nuestra variable dependiente respecto de los valores predichos.
+
+
+No esperamos que los residuos sigan una distribución normal, ya que se ven afectados por la transformación:
+
+```{r}
+plot(modelo_logit,which=c(2),main="M1", adj = 0)
+```
+
+No obstante, la aproximación de los residuos a una distribución normal no sería tan mala.
+
+La devianza es la generalización de la suma  de los residuos al cuadrado (usada en la regresión lineal) a casos donde el modelo se ajusta por máxima verosimilitud. Se calcula como
+
+$\begin{aligned} D_{\mathcal{M}} = -2 \log \left(\dfrac{L_{\mathcal{M}}}{L_{\mathcal{S}}} \right) = -2 (\log L_{\mathcal{M}} - \log L_{\mathcal{S}}), \end{aligned}$
+
+donde $L_{\mathcal{M}}$ y $L_{\mathcal{S}}$ denotan el valor del estimador de máximo verosimilitud de nuestro modelo y para el modelo saturado respectivamente. El modelo saturado es aquel que se construye a partir de un conjunto de parámetro para cada observación de forma que los datos están ajustados de forma exacta. 
+
+Para nuestro caso, la función *GLM* nos devuelve este valor en el atributo *deviance*
+
+```{r}
+modelo_logit$deviance
+```
+
+Esta métrica nos permitirá comparar varios modelos entre sí, pudiendo elegir como mejor el que menos devianza tenga.
+
+También analizamos la curva ROC. Esta curva se construye representando la *sensibilidad* respecto a *1 - especifidad*. Estos parámetros a su vez no son más que ratios entre los valores de la matriz de confusión. En esta matriz se comparan los valores predichos por el modelo frente a los valores reales observados. Para nuestro modelo binomial, la matriz de confusión toma 4 posibles valores:
+
+1. Verdadero Positivo (VP): estimamos Positivo y Realidad Positivo.
+2. Falso Positivo (FP): estimamos Positivo y Realidad Negativo.
+3. Verdadero Negativo (VN): estimamos Negativo y Realidad Negativo.
+4. Falso Negativo (FN): estimamos Negativo y Realidad Positivo.
+
+De esta forma, se pueden definir los conceptos de especificidad y sensibilidad:
+
+1. Especificidad: VN/(VN+FP). Cuanto mayor mejor.
+2. Sensibilidad: VP/(VP+FN). Cuanto mayor mejor
+
+Hemos explicado que el modelo logit se puede usar como clasificador. Para ello, necesitamos definir un valor de corte para $p$ a partir de cual consideremos que el valor predicho es 0 o 1. Para cada valor de corte tendremos un clasificador diferente, con sensibilidad y especificidad diferentes. Esto nos permite construir la curva variando el parámetro de corte. 
+
+Para tomar una métrica de lo bueno que es nuestro modelo logit podemos integrar el área bajo esta curva. Este resultado será independiente del valor del parámetro de corte usado para cada clasificador. La función *auc* nos permite calcular dicha área:
+
+
+```{r}
+auc(german_credit$response,predict(modelo_logit,german_credit,type="response"))
+```
+Nótese que los parámetros de entrada de la función son la variable dependiente que queremos explicar y la probabilidad *p* de nuestro modelo logit (la cual se obtiene usando *predict* con el parámetro *type=response*). 
+
+Existe el siguiente consenso a la hora de valorar el área bajo la curva:
+
+[0.5]: Es como lanzar una moneda.
+
+[0.5, 0.6): Test malo.
+
+[0.6, 0.75): Test regular.
+
+[0.75, 0.9): Test bueno.
+
+[0.9, 0.97): Test muy bueno.
+
+[0.97, 1): Test excelente.
+
+En nuestro caso, el valor se sitúa en el intervalo *bueno*.
+
+
+Por último, representamos las distribuciones de los valores de nuestra variable dependiente respecto de los valores predichos:
+
+```{r results='asis', size="small"}
+predict<-predict(modelo_logit,german_credit,type="response")
+ggplot(german_credit, aes(x = predict, fill = as.factor(response))) +
+        geom_density(alpha = .5)
+```
+
+Este tipo de visualización nos ayuda a ver el punto de corte óptimo que tendríamos que seleccionar en la probabilidad para maximizar las diferencias entre 0 y 1. La distribución de 0 se concentra en el valor 0 predicho por nuestro modelo, demostrando que un valor poco elevado de *p* bastaría para clasificar la mayoría de 0 correctamente. Por otro lado, la distribución de valores 1 se extiende a lo largo del eje de valores *p*. Por lo tanto, concluimos que el parámetro de corte óptimo tendría que estar entre 0 y 0.5. 
+
+# 2. Interpreta la variable duration. ¿Es significativa? ¿A partir de qué nivel de significación deja de ser significativa? 
+
+Necesitamos obtener el grado de significación para la variable *duration*. Aplicando *summary* sobre nuestro modelo podemos ver el valor obtenido para los parámetros del ajuste, la desviación estándar, el z value y el p-value:
+
+```{r}
+summary(modelo_logit)
+```
+
+El modelo asume que las variables siguen una distribución normal y por tanto la distribución de los parámetros es también normal. Esta asunción fue validada en el ejercicio anterior donde vimos que los residuos normalizados siguen esta distribución aproximadamente. De esta forma, el *z-value* mide de forma indirecta la distancia entre el parámetro del ajuste y el valor 0, y es calculado como:
+
+$z_{value} = estimate / std.error$
+
+De forma equivalente, *P(>|Z|)* nos da la probabilidad asociada a dicho valor *z*, es decir, la probabilidad de que el parámetro de ajuste sea compatible con 0 asumiendo una distribución normal. En este caso, *P(>|Z|)* representaría directamente el grado de significación de la variable.
+
+Como vemos, el valor de la pendiente de *duration* es bajo, -0.027, lo que hace pensar ingenuamente que no es significativa. No obstante, la desviación típica obtenida para este parámetro es también muy pequeña en comparación con el resto de variables. A partir de estos dos valores, se obtiene un *z-value* de *2.997*, bastante alejado de 0. A partir de *z* se calcula *P(>|Z|)*, el cual da *0.002724*. 
+
+
+Por lo tanto, nuestra variable es significativa al nivel estándar de *0.05*, ya que el valor *P(>|Z|)* es menor que dicho nivel. Si por el contrario, considerásemos un nivel de significación de *0.001*, concluiríamos que la variable no es significativa.
+
+
+En este ejercicio hemos usado *summary* y hemos analizado las pendientes. Otra forma de resolverlo sería usando los efectos marginales del modelo, es decir, calcular como afecta el incremento de una unidad en cada variable:
+
+```{r}
+#efectos marginales:
+logitmfx(data = german_credit, modelo_logit)
+
+```
+Asumiendo que las variables se distribuyen de forma estándar, calculamos *z* como:
+
+$z =  \frac{dF/dx}{Std. Err.}$
+
+En este caso, vemos que para la variable *duration* obtenemos un *z-value* de *2.9981* cuya probabilidad asociada *P(>|Z|)* es de *0.0027171*. Por tanto, llegamos a la misma conclusión: la variable es significativa para el nivel de significación *0.05*, pero no lo es para el nivel *0.001*.
+
+# 3. Si eliminamos la variable amount del modelo, ¿crees que alguna otra variable incrementaría el sesgo provocado por la falta de amount en el modelo? Es decir, identifica el sesgo en otra variable producido por eliminar la variable amount. 
+
+
+Probamos a quitar la variable *amount* del modelo:
+
+```{r}
+formular_sin_amount <- as.formula("response~chk_acct+duration+credit_his+purpose+saving_acct+present_emp+installment_rate+sex+other_debtor+present_resid+property+age+other_install+housing+n_credits+job+n_people+telephone+foreign")
+
+german_credit_sin_amount<-dplyr::select(german_credit, -amount)
+
+modelo_logit_sin_amount<-glm(formula=formular_sin_amount, data=german_credit_sin_amount, family=binomial(link="logit"))
+
+summary(modelo_logit_sin_amount)
+```
+
+Como vemos, las pendientes han cambiado. En particular, observamos un cambio grande para la variable *duration* la cual pasa de un *0.02786* a *0.043200*. Sospechamos que este efecto es debido a que ambas están correlacionadas.
+
+De hecho, si analizamos las posibles variables numéricas que podrían absorber el sesgo,
+
+```{r}
+cr <- cor(dplyr::select(german_credit, duration, amount, age, n_credits, n_people, installment_rate, present_resid), use="complete.obs")
+ggcorrplot(cr, 
+           hc.order = TRUE, 
+           type = "lower",
+           lab = TRUE)
+```
+
+vemos que *amount* y *duration* están significativamente más correlacionadas entre sí que el resto. Esta relación entre ambas es explicable, ya que es de esperar que un crédito con un *amount* o montante más alto tarde más en ser devuelto que uno de un montante más bajo. Es decir, es esperable una proporcionalidad directa entre el montante del crédito y la duración de este. 
+
+Además, como podemos ver en el ejercicio anterior, tanto la variable *duration* como *amount* son significativas al 0.05, lo cual indica que sería mala idea desecharlas. De hecho, como en el modelo de este ejercicio la variable *amount* no está pero sí que es realmente significativa para el análisis, el modelo está buscando un proxy a partir del cual pueda tener en cuenta el montante del crédito. Como hemos visto, la variable *duration* encaja bien como posible candidata a actuar como variable intermediaria.
+
+Concluimos por tanto que estamos introduciendo un sesgo en la variable *duration*, ya que el parámetro del modelo asociado a esta variable ha cambiado significativamente. Parte de este valor está representando la duración del crédito y otra parte el montante.
+
+# 4. Identifica efectos no lineales en la variable duration y amount. Interpreta los nuevos resultados después de meter, en el modelo, estas no linealidades.
+
+Usamos la función *earth* disponible en el paquete del mismo nombre. Esta función construye una regresión multivariante adaptativa en la que se van analizando las variables sobre diferentes rangos con la finalidad de romper la linealidad del modelo:   
+
+```{r}
+modelo_earth<-earth(response~., data=german_credit, glm=list(family=binomial(link=logit)), thresh = 0.01)
+
+summary(modelo_earth)
+```
+
+La función *earth* nos indica que las variables *duration* y *amount* presentan efectos no lineales. En concreto, nos sugiere que dividamos cada variable en dos intervalos y los analicemos de forma separada.
+
+Para la variable *duration*, nos señala que tracemos una recta hasta el valor 12 y otra diferente desde el valor 12. Para *amount*, lo mismo para el valor 2978. Para poder hacer esto, creamos dos nuevas variables:  
+
+```{r}
+german_credit_no_lineal <- german_credit
+
+german_credit_no_lineal$duration_hasta_12<-((12-german_credit_no_lineal$duration)<0)*0+((12-german_credit_no_lineal$duration)>=0)*(12-german_credit_no_lineal$duration)
+german_credit_no_lineal$duration_despues_12<-((german_credit_no_lineal$duration-12)<0)*0+((german_credit_no_lineal$duration-12)>=0)*(german_credit_no_lineal$duration-12)
+
+
+german_credit_no_lineal$amount_hasta_2978<-((2978-german_credit_no_lineal$amount)<0)*0+((2978-german_credit_no_lineal$amount)>=0)*(2978-german_credit_no_lineal$amount)
+german_credit_no_lineal$amount_despues_2978<-((german_credit_no_lineal$amount-2978)<0)*0+((german_credit_no_lineal$amount-2978)>=0)*(german_credit_no_lineal$amount-2978)
+
+head(german_credit_no_lineal)
+```
+
+Creamos el modelo logit binomial desechando las variables *duration* y *amount* en favor de las nuevas variables:
+
+```{r}
+formula_no_lineal <- as.formula("response~chk_acct+credit_his+purpose+saving_acct+present_emp+installment_rate+sex+other_debtor+present_resid+property+age+other_install+housing+n_credits+job+n_people+telephone+foreign+duration_hasta_12+duration_despues_12+amount_hasta_2978+amount_despues_2978")
+
+modelo_logit_no_lineal<-glm(formula = formula_no_lineal, data=german_credit_no_lineal, family=binomial(link="logit"))
+
+summary(modelo_logit_no_lineal)
+```
+
+En nuestro modelo logit original, los parámetros del ajuste asociados a la variable *duration* y *amount* tenían los valores $2.786 \times 10 ^{-2}$ y $1.283 \times 10 ^{-4}$ respectivamente. En nuestro modelo no logit no lineal, por cada parámetro original tenemos dos nuevos parámetros. 
+
+Tras separar la variable *duration* se obtiene un valor negativo de *-0.1608* para el primer intervalo hasta el valor 12, y de *$2.924 \times 10 ^{-2}$* para el segundo intervalo. Vemos, por tanto, que a partir del valor 12 la variable *duration* invierte su proporcionalidad con respecto a la probabilidad. Para ver mejor este efecto en nuestro modelo, despejemos la probabilidad *p*:
+
+${\displaystyle p={\frac {1}{1+e^{-(\beta _{0}+\beta _{1}x_{1}+\beta _{2}x_{2} + ... + \beta _{m}x_{m})}}}}$
+
+Como vemos, si $\beta_i > 0$ un incremento en la variable $x_i$ contribuye a aumentar *p*, mientras que con $\beta_i < 0$, un incremento en la variable $x_i$, tiende a disminuir *p*. 
+
+De esta forma, la variable *duration* pasa de tener una relación inversamente proporcional con *p* para valores inferiores a 12 a ser directamente proporcional a *p* para valores superiores a 12. Recordemos que *p* representa la probabilidad de impago que nuestro modelo asigna, siendo 0 crédito bueno y 1 crédito malo.
+
+En el caso de la variable *amount* no se observa un cambio de signo con respecto al modelo original, por lo tanto, la proporcionalidad directa entre el valor de la variable y la probabilidad *p* se mantiene en ambos intervalos. No obstante, sí se aprecia una diferencia entre las pendientes entre el primer intervalo $2.897 \times 10^{-4}$ y el segundo $1.875 \times 10^{-4}$, lo que nos indica un cambio de tendencia.
+
+Por último, podemos ahora comparar este modelo no lineal con el creado en el primer ejercicio, en el cual explicamos y obtuvimos una de las métricas para realizar la comparación, la devianza:
+
+```{r}
+modelo_logit_no_lineal$deviance
+modelo_logit$deviance
+```
+Cuanta menos devianza, más se ajusta nuestro modelo a los datos. Como vemos, el modelo logit no lineal se ajusta mejor que el modelo logit original. 
+
+
+# 5. ¿Cuál es la probabilidad estimada media de que el crédito sea malo para mayores de 50 años? 
+
+Para analizar esto, cogemos de nuestra base de datos aquellos registros con edad superior a 50 y predecimos la probabilidad con nuestro modelo logit no lineal. A continuación pintamos en un histograma cómo varía nuestra predicción por intervalos de edad:
+
+
+```{r}
+german_credit_no_lineal_50 <- german_credit_no_lineal[german_credit_no_lineal$age>50,]
+
+predicted <- predict(modelo_logit_no_lineal,german_credit_no_lineal_50,type="response")
+
+Hist(german_credit_no_lineal_50, response = as.numeric(as.character(german_credit_no_lineal_50$response)), predicted = predicted, var = german_credit_no_lineal_50$age, n=13,breaks = 10)
+```
+
+Como vemos, la probabilidad predicha por nuestro modelo oscila según el rango de edad. Podemos ver el valor medio predicho para cada edad. No obstante, solo se nos pide que estimemos la media de toda esta muestra, por lo tanto hacemos:
+
+```{r}
+promedio <- mean(predicted)
+promedio
+```
+```{r}
+percentil_95 <- 1.96
+desviacion_tipica <- sd(predicted) / sqrt(length(predicted))
+
+promedio + percentil_95 * desviacion_tipica
+promedio - percentil_95 * desviacion_tipica
+```
+
+
+Podemos hacer lo mismo para los menores de 50:
+
+```{r}
+german_credit_no_lineal_50 <- german_credit_no_lineal[german_credit_no_lineal$age<50,]
+
+predicted <- predict(modelo_logit_no_lineal,german_credit_no_lineal_50,type="response")
+
+Hist(german_credit_no_lineal_50, response = as.numeric(as.character(german_credit_no_lineal_50$response)), predicted = predicted, var = german_credit_no_lineal_50$age, n=13,breaks = 10)
+```
+
+```{r}
+promedio <- mean(predict)
+promedio
+```
+```{r}
+percentil_95 <- 1.96
+desviacion_tipica <- sd(predicted) / sqrt(length(predicted))
+
+promedio + percentil_95 * desviacion_tipica
+promedio - percentil_95 * desviacion_tipica
+```
+
+Concluimos que los intervalos de confianza son lo suficientemente estrechos, de forma que hay una tensión entre los dos promedios. Así, la probabilidad de impago para mayores de 50 es un 5% menor que para menores de 50.
+
+
+# 6. ¿Crees que hay discriminación de género en este último modelo creado?
+
+Para ver esto calculamos los efectos marginales del modelo:
+
+```{r}
+logitmfx(data = german_credit_no_lineal, modelo_logit_no_lineal)
+```
+Como vemos, las variables *sexA92* y *sexA94* no son significativas ya que tienen un p-value de 0.35 y 0.10 respectivamente. Por su lado, la variable *sexA93* sí es significativa al 0.05 de significación. Para este caso, la pendiente es $-1.3556*10^{-1}$.
+
+Si consultamos el diccionario de variables, 
+
+A91 : male : divorced/separated
+
+A92 : female : divorced/separated/married
+
+A93 : male : single
+
+A94 : male : married/widowed
+
+A95 : female : single,
+
+A93 se corresponde con los hombres solteros. No obstante, esta variable mezcla el estado civil y el género. Para realizar una comparación con sentido habría que considerar mismos estados civiles, de forma que tendríamos que comparar la variable *A93* con la variable *A95*, ya que el estado civil de ambos es el mismo, *single*. Sin embargo, en nuestro conjunto de datos, no hay ningún registro con *A95*, y por ende no podemos hacer la comparación. Concluimos que no podemos valorar si hay discriminación de género con este modelo.
+
+Para tratar de contestar a la pregunta referente a la discriminación de género, puesto que conocemos A91, A92, A93, A94 y A95, podemos crear un nuevo modelo logit donde usemos una variable que represente al género.
+
+```{r}
+german_credit_genero <- german_credit_no_lineal
+
+german_credit_genero$male<-((german_credit_no_lineal$sex == "A91") | (german_credit_no_lineal$sex == "A93") | (german_credit_no_lineal$sex == "A94"))*1+((german_credit_no_lineal$sex == "A92") | (german_credit_no_lineal$sex == "A95"))*0
+
+head(german_credit_genero)
+```
+
+Construimos un nuevo modelo desechando la variable *sex* en favor de la nueva variable indicativa del género, *male*:
+
+```{r}
+formula_no_lineal_gender <- as.formula("response~chk_acct+credit_his+purpose+saving_acct+present_emp+installment_rate+other_debtor+present_resid+property+age+other_install+housing+n_credits+job+n_people+telephone+foreign+duration_hasta_12+duration_despues_12+amount_hasta_2978+amount_despues_2978+male")
+
+modelo_logit_no_lineal_gender<-glm(formula = formula_no_lineal_gender, data=german_credit_genero, family=binomial(link="logit"))
+
+summary(modelo_logit_no_lineal_gender)
+```
+
+Como vemos, la nueva variable *male* tiene un p-value de 0.108894, lo que nos indica que no es significativa al nivel de significación de 0.05. Por lo tanto, concluimos que, con este nivel de significación, no podemos rechazar la hipótesis nula, la cual supone que no hay discriminación de género.
+

@@ -1,0 +1,405 @@
+---
+title: "M5_AI3_SantamariaFabio"
+author: "Fabio Santamaría"
+date: "24/5/2021"
+urlcolor: blue
+output:
+  word_document:  default
+  pdf_document:   default
+  epuRate::epurate:
+    toc:             TRUE
+    number_sections: FALSE
+    code_folding:    "show"
+  html_document: 
+    theme:        cosmo 
+    highlight:    tango 
+    toc:          true
+    toc_float:    true
+    code_folding: show
+---
+
+<style>
+body {
+text-align: justify}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+source("Functions.R")
+library(glmnet)
+library(dplyr)
+library(tidyr)
+library(spatialreg)
+```
+
+```{r, include=FALSE}
+# Definir funciones utiles:
+pl_pt_2 <- function(df,longitude, latitude, size2,color2,dd=5,sz=500){
+  
+  volterars=0
+  volterarc=0
+  
+  if (!is.numeric(size2)) {  df$size<-as.numeric(as.factor(size2)) }
+  if (!is.numeric(color2)) { df$color<-as.numeric(as.factor(color2))}
+  if (is.numeric(size2)) {  df$size<-(size2) }
+  if (is.numeric(color2)) { df$color<-(color2)}
+  x<-dd 
+  dd<-seq(0,1,1/dd)
+  
+  if (volterars==1){      df$size<-(max(df$size)+1-df$size)    }
+  if (volterarc==1){      df$color<-(max(df$color)+1-df$color)    } 
+  
+  
+  if (length(unique(df$color))<10){    pal <- colorBin(palette = "RdYlBu", domain = df$color ,bins = length(levels(as.factor(df$color))) , na.color = "grey40", reverse = T) }
+  if (length(unique(df$color))>=10){   pal <- colorBin(palette = "RdYlBu", domain = df$color ,bins = unique(quantile(df$color, dd )), na.color = "grey40", reverse = T) }
+  
+  a<-as.character(cut(as.numeric(as.factor(df$size)),breaks=x))
+  a<-as.numeric(as.factor(a))
+  
+  
+   pintar<-leaflet() %>%
+    addTiles() %>%
+    addLegend(pal = pal, values = round(df$color, 1), position = "bottomright", title = "") %>%
+    addCircles(data=df,lng = longitude, lat = latitude , stroke = FALSE, opacity = 0.5,fillOpacity = 0.5,
+               color =pal(df$color),radius=a*sz)
+  
+  return(pintar)
+}
+```
+
+
+# Utilizando la base de datos de pisos que hemos utilizado durante el temario, podemos encontrar un listado de pisos disponibles en Airbnb en Madrid. Por temas computacionales, debes quedarte con un máximo de 2000 viviendas para responder las siguientes preguntas:
+
+Primero, leemos de nuestra bbdd todos los pisos:
+
+```{r}
+tabla_complete <- read.csv("data/table_5.05.csv")
+
+head(tabla_complete)
+```
+
+Escogemos 2000 registros con un muestreo aleatorio simple sin reemplazo:
+
+```{r}
+set.seed(1)
+print(dim(tabla_complete))
+tabla <- tabla_complete[sample(nrow(tabla_complete), 2000, replace = FALSE), ]
+print(dim(tabla))
+```
+
+# 1. ¿Existe dependencia espacial en la variable precio? ¿Qué tipo de dependencia espacial existe: local, global o ambas? 
+
+Definimos los vecinos gracias a la información espacial contenida en nuestra base de datos, la longitud y la latitud de cada piso. Consideramos como vecinos de un piso aquellos 10 que estén lo más cerca posible. Con esta información, realizamos el test de I-Moran sobre la variable *price*:
+
+```{r  size="small",warning=FALSE,message=FALSE}
+nb <- knn2nb(knearneigh(cbind(tabla$longitude, tabla$latitude), k=10))
+
+moran.test(x = tabla$price, listw = nb2listw(nb, style="W"))
+moran.plot(x = tabla$price, listw = nb2listw(nb, style="W"), main="Gráfico I Moran")
+```
+
+El test numérico nos indica que debemos rechazar la hipótesis nula, en la que se supone independencia espacial, ya que p-value = $2.36 \times 10^{-8} << 0.05$. Por lo tanto, vemos una fuerte dependencia espacial de tipo global sobre la variable *price*.
+
+
+Para ver si, además de esto, hay alguna zona en el mapa que presenta un alto grado de dependencia
+espacial, es decir, una dependencia espacial local, podemos realizar el test LISA (Local indicators of spatial association), que es equivalente al I-Moran por regiones. Esto se puede implementar con la función *localmoran*:
+
+```{r  size="small",warning=FALSE,message=FALSE}
+imoranlocal<-as.data.frame(localmoran(x = tabla$price, listw = nb2listw(nb, style="W")))
+tabla$registo<-1                         
+pl_pt_2(tabla, tabla$longitude, tabla$latitude, color2 = imoranlocal$Z.Ii, size2 =tabla$registo, dd = 5)                       
+```
+
+Observamos que sí que hay dependencia espacial local, ya que se obtiene una distribución desigual de colores en el mapa.
+
+Por lo tanto, en este ejercicio, vemos que existe dependencia global y local en la variable *price*.
+
+# 2. Establece un modelo lineal para estimar la variable precio por m2. ¿Hay dependencia espacial en los residuos del modelo? 
+
+Creamos un GLM (generalized linear model) donde *logprice* es la variable dependiente y el resto de variables del conjunto de datos son las variables independientes, ignorando *price*, las coordenadas y el tipo de habitación (pues esta última variable solo incluye un único valor):
+
+```{r}
+formula<-as.formula('logprice ~ minimum_nights + number_of_reviews + review_scores_value + calculated_host_listings_count + bedrooms + reviews_per_month + beds + accommodates + availability_30 + availability_60 + availability_90 + instant_bookable + Distancia_Centro + Distancia_Norte + Distancia_Sur + tv_ports + phone_ports + Vecinos + Piso + ventanas')
+
+modelo_glm<-glm(formula = formula, data = tabla, family = gaussian)
+
+summary(modelo_glm)
+```
+
+Realizamos el tests I-Moran para los residuos de este modelo:
+
+```{r  size="small",warning=FALSE,message=FALSE}
+moran.test(x = modelo_glm$residuals, listw = nb2listw(nb, style="W"))
+moran.plot(x = modelo_glm$residuals, listw = nb2listw(nb, style="W"), main="Gráfico I Moran")
+```
+
+El test numérico nos indica que debemos rechazar la hipótesis nula, en la que se supone independencia espacial, ya que p-value = $6.848 \times 10^{-9} << 0.05$. Por lo tanto, vemos una fuerte dependencia espacial de tipo global.
+
+
+# 3. Introduce una variable más en el modelo. Dicha variable es la distancia mínima entre cada persona y la geolocalización de las oficinas bancarias de Madrid obtenidas con OSM. ¿Sigue habiendo dependencia espacial en los residuos del nuevo modelo? 
+
+Descargamos las coordenadas de las oficinas bancarias de Madrid de Open Street Maps:
+
+```{r}
+#Descargo datos OSM
+bancos<-Descarga_OSM(ciudad="Madrid",key='amenity',value = "bank")
+leaflet(bancos[[1]]) %>% addTiles() %>% addPolygons(data = bancos[[2]], col = "red", label = bancos[[3]] ) %>% addCircles()
+```
+
+Calculamos las distancias, escogemos la mínima distancia entre un banco y un inmueble para cada piso y hacemos una transformación logarítmica:
+
+```{r}
+#Banks
+coordenadas<-as.data.frame(gCentroid(bancos[[2]], byid=TRUE)@coords)
+Distancias<-distm(cbind(tabla$lon,tabla$lat),cbind(coordenadas$x,coordenadas$y),fun = distCosine )/1000
+tabla$logdist_bank<-log(round(apply(Distancias,1,min),2))
+tabla$dens_bank<-apply((Distancias<1)*1,1,sum)
+
+head(tabla)
+```
+
+
+Creamos de nuevo un modelo GLM parecido al usado en el ejercicio anterior, añadiendo la nueva variable calculada *logdist_bank*:
+
+```{r}
+formula2<-as.formula('logprice ~ minimum_nights + number_of_reviews + review_scores_value + calculated_host_listings_count + bedrooms + reviews_per_month + beds + accommodates + availability_30 + availability_60 + availability_90 + instant_bookable + Distancia_Centro + Distancia_Norte + Distancia_Sur + tv_ports + phone_ports + Vecinos + Piso + ventanas + logdist_bank')
+
+modelo_glm_v2<-glm(formula = formula2, data = tabla, family = gaussian)
+
+summary(modelo_glm_v2)
+```
+
+Como vemos, la nueva variable sí es significativa. Volvemos a realizar el test I-Moran sobre los residuos:
+
+```{r  size="small",warning=FALSE,message=FALSE}
+moran.test(x = modelo_glm_v2$residuals, listw = nb2listw(nb, style="W"))
+moran.plot(x = modelo_glm_v2$residuals, listw = nb2listw(nb, style="W"), main="Gráfico I Moran")
+```
+
+El test numérico nos indica que debemos rechazar la hipótesis nula, en la que se supone independencia espacial, ya que p-value = $1.015 \times 10 ^{-6} << 0.05$.  Por lo tanto, vemos una fuerte dependencia espacial de tipo global. No obstante, haber introducido las distancias a las sucursales bancarias ha ayudado a disminuir la dependencia espacial de nuestro modelo, ya que en el test I-Moran realizado en el ejercicio anterior obtuvimos un p-value mucho menor, $6.848 \times 10 ^ {-9}$.
+
+
+# 4. Modeliza el precio con un SAR. ¿Es significativo el factor de dependencia espacial? Interpreta el modelo.
+
+Creamos un modelo SAR (Spatial Autorregresive Model): 
+
+$$ Y=X\beta + \rho WY+u $$
+
+Donde Y es la variable dependiente, X el vector de variables independientes, $\beta$ el vector de parámetros del modelo, $\rho$ es el parámetro adicional que regula el impacto de los efectos espaciales, W es la matriz de pesos espaciales y u es el residuo. La estimación de los parámetros del modelo se realiza mediante el método de máxima verosimilitud (estimation by maximum likelihood). De esta forma, se consigue introducir la influencia que puedan tener los vecinos en la variable dependiente.
+
+Implementamos este modelo usando la misma fórmula que en el ejercicio anterior. Para ello, nos valemos de la función *lagsarlm* de *spdep*:
+
+```{r  size="small",warning=FALSE,message=FALSE}
+modelo_espacial_sar <- lagsarlm(formula = formula2, data=tabla, listw = nb2listw(nb, style="W")) 
+summary(modelo_espacial_sar)
+
+paste("residuos modelo GLM",sum((modelo_glm_v2$resid)**2))
+paste("residuos modelo GLMEspacial",sum((modelo_espacial_sar$residuals)**2))
+```
+
+
+
+Vemos que la suma de residuos al cuadrado para este modelo es ligeramente inferior al modelo GLM. Por lo tanto, el ajuste con este modelo es un poco mejor.
+
+Hagamos de nuevo el test I-Moran:
+
+```{r  size="small",warning=FALSE,message=FALSE}
+moran.test(x = modelo_espacial_sar$residuals, listw = nb2listw(nb, style="W"))
+moran.plot(x = modelo_espacial_sar$residuals, listw = nb2listw(nb, style="W"), main="Gráfico I Moran")
+```
+
+En este caso, el test numérico nos indica que no podemos rechazar la hipótesis nula, en la que se supone independencia espacial, ya que p-value = 0.5651 > 0.05. Por lo tanto, este modelo consigue romper la dependencia espacial observada en los modelos anteriores. Además, en el gráfico se observa como los residuos son distribuidos de forma más uniforme.
+
+Concluimos que el factor de dependencia espacial es significativo, ya que al incluirlo hemos conseguido romper la dependencia espacial observada en los modelos anteriores. Por otro lado, en el propio output del modelo observamos:
+
+"Rho: 0.18938, LR test value: 23.294, p-value: 1.39e-06"
+
+Aquí se nos indica el valor del parámetro espacial, $\rho = 0.18938$, y su grado de significación, p-value = $1.39 \times 10^{-6} << 0.05$. Por lo tanto, también se concluye que el factor de dependencia es significativo.
+
+Para interpretar el modelo, como de costumbre, nos fijamos en el signo de las betas y su grado de significación. Como criterio, nos fiamos de aquellas cuyo p-value, indicado en la columna *Pr(>|z|)*, es inferior a 0.05. Entre estas, podemos distinguir:
+
+Signo positivo: *number_of_reviews*, *review_scores_value*, *bedrooms*, *accommodates*, *availability_30*, *Distancia_Sur*
+
+Signo negativo: *minimum_nights*, *calculated_host_listings_count*, *reviews_per_month*, *Distancia_Centro*, *logdist_bank*
+
+Aquellas con signo positivo son proporcionales al precio y aquellas con signo negativo son inversamente proporcionales al precio.
+
+
+# 5. Modeliza el precio con un SEM. ¿Es significativo el factor de dependencia espacial? Interpreta el modelo. 
+
+Creamos un modelo SEM (Spatial Error Model): 
+
+$$ \begin{align}
+Y=X\beta + u  \\
+u = \rho W u + \epsilon 
+\end{align}$$
+
+Donde Y es la variable dependiente, X el vector de variables independientes, $\beta$ el vector de parámetros del modelo, $\rho$ es el parámetro adicional que regula el impacto de los efectos espaciales, W es la matriz de pesos espaciales y $\epsilon$ es el residuo. Aquí, asumimos que la existencia de factores o variables no considerados en la especificación del modelo trasladan la dependencia espacial al término de error. Por lo tanto, el error lleva implícito una estructura espacial. La estimación de los parámetros del modelo se realiza mediante el método de máxima verosimilitud (estimation by maximum likelihood)
+
+Implementamos este modelo usando la misma fórmula que en el ejercicio anterior. Para ello, nos valemos de la función *errorsarlm* de *spatialreg*:
+
+
+```{r  size="small",warning=FALSE,message=FALSE}
+modelo_espacial_sem <- errorsarlm(formula = formula,data=tabla, listw = nb2listw(nb, style="W")) 
+summary(modelo_espacial_sem)
+
+paste("residuos modelo GLM",sum((modelo_glm_v2$resid)**2))
+paste("residuos modelo GLMEspacial SAR",sum((modelo_espacial_sar$residuals)**2))
+paste("residuos modelo GLMEspacial SEM",sum((modelo_espacial_sem$residuals)**2))
+```
+
+Al igual que el modelo SAR, vemos que la suma de residuos al cuadrado para este modelo es ligeramente inferior al modelo GLM. Por lo tanto, el ajuste con este modelo es un poco mejor.
+
+Hagamos de nuevo el test I-Moran:
+
+```{r  size="small",warning=FALSE,message=FALSE}
+moran.test(x = modelo_espacial_sem$residuals, listw = nb2listw(nb, style="W"))
+moran.plot(x = modelo_espacial_sem$residuals, listw = nb2listw(nb, style="W"), main="Gráfico I Moran")
+```
+
+Al igual que para el modelo SAR, el test numérico nos indica que no podemos rechazar la hipótesis nula, en la que se supone independencia espacial, ya que p-value = 0.5211 > 0.05. Por lo tanto, este modelo también consigue romper la dependencia espacial observada en los modelos GLM anteriores. Además, en el gráfico también se observa como los residuos son distribuidos de forma más uniforme.
+
+Concluimos que el factor de dependencia espacial es significativo, ya que al incluirlo hemos conseguido romper la dependencia espacial observada en los modelos anteriores. Por otro lado, en el propio output del modelo observamos:
+
+"Lambda: 0.20118, LR test value: 18.238, p-value: 1.9491e-05"
+
+Aquí se nos indica el valor del parámetro espacial, $\rho = 0.20118$, y su grado de significación, p-value = $1.9491 \times 10^{-5} << 0.05$. Por lo tanto, también se concluye que el factor de dependencia es significativo.
+
+Para interpretar el modelo, al igual que en el ejercicio anterior, nos fijamos en el signo de las betas y su grado de significación. Como criterio, nos fiamos de aquellas cuyo p-value, indicado en la columna *Pr(>|z|)*, es inferior a 0.05. Entre estas, podemos distinguir:
+
+Signo positivo: *number_of_reviews*, *review_scores_value*, *bedrooms*, *accommodates*, *availability_30*, *Distancia_Sur*
+
+Signo negativo: *minimum_nights*, *calculated_host_listings_count*, *reviews_per_month*, *Distancia_Centro*, *logdist_bank*
+
+Como vemos, los signos de las variables y su grado de significación son muy similares a los obtenidos con el modelo SAR. Tal y como se dijo, aquellas con signo positivo son proporcionales al precio y aquellas con signo negativo son inversamente proporcionales al precio.
+
+# 6. Valora la capacidad predictiva del modelo SAR con la técnica de validación cruzada. 
+
+Una de las formas de validar la capacidad predictiva de nuestro modelo consiste en aplicarlo sobre diferentes submuestras, de forma que obtengamos diferentes valores para los parámetros y así hacer un poco de estadística con ellos. A continuación, aplicamos el modelo sobre 10 submuestras de 1000 pisos y pintamos un boxplot con las diferentes medidas obtenidas para cada parámetro:   
+
+```{r  warning=FALSE,message=FALSE}
+pisos<-dplyr::select(tabla,-X, -price,-room_type, -registo, -dens_bank, -longitude, -latitude)
+matriz<-as.data.frame(matrix(0,nrow=10,ncol=ncol(pisos)))
+
+for (i in 1:10){
+  rand<-sample(c(1:nrow(tabla)), size=0.5*nrow(tabla), replace = FALSE)
+  pisos_i <- tabla[rand,]
+  nb_i <- knn2nb(knearneigh(cbind(pisos_i$longitude, pisos_i$latitude), k=5))
+  modelopisos <- lagsarlm(formula = formula2, data=pisos_i, listw = nb2listw(nb_i, style="W"))
+  matriz[i,]<-as.vector(modelopisos$coefficients)
+}
+
+colname<-c("intercep",colnames(pisos))
+colname <- colname[!colname %in% "logprice"]
+colnames(matriz)<-colname
+matriz<-matriz[,-1]
+
+p<-suppressMessages(diag_cajas(matriz,filas = floor(ncol(pisos)/5)+1,columnas=5))
+```
+
+Observamos parámetros cuyos valores se dispersan alrededor del 0. Un ejemplo de esto son *availability_90*, *instant_bookable*, *Distancia_Norte*, *tv_ports*, *Vecinos* y *Piso*. Estas variables no son confiables a la hora de predecir, bien porque no sean relevantes o bien porque contengan efectos no lineales. Esto está en acuerdo con lo visto en los ejercicios anteriores, donde p-value de estas variables fue superior a 0.05. En contra, los parámetros con poca dispersión como *minimum_nights*, *number_of_reviews*, *review_scores_value*, *calculated_host_listings_count*, *bedrooms*, *reviews_per_month*, *beds*, *accomodates*, *availability_30*, *Distancia_Sur*, *ventanas* son los menos insesgados y los más fiables a la hora de realizar una predicción.
+
+Por otro lado, para valorar la capacidad predictiva de nuestro modelo de forma general, podemos realizar un conjunto de validaciones cruzadas K-fold en donde calculamos el $R^2$ de cada ajuste. Sobre este conjunto, calculamos los estadísticos de posición y centralización para $R^2$:
+
+```{r  warning=FALSE,message=FALSE}
+set.seed(1)
+pisos <- tabla
+veces<-5
+
+medias<-c(0)
+for (x in 1:veces){
+  division<-4
+  pisos$cluster<-sample(x = c(1:division),size = nrow(pisos),replace = T)
+  aucamele<-c(0)
+    
+  for (i in 1:division){
+    sopa<-pisos[pisos$cluster!=i,]
+    nb2 <- knn2nb(knearneigh(cbind(sopa$longitude, sopa$latitude), k=10))
+    
+    modelo_SAR<-lagsarlm(formula = formula2, data=sopa,listw = nb2listw(nb2, style="W"))
+    
+    sopa2<-pisos[pisos$cluster==i,]
+    nb3 <- knn2nb(knearneigh(cbind(sopa2$longitude, sopa2$latitude), k=10))
+    nb4 <- nb2mat(nb3)
+    
+    #Calculo
+    X<-dplyr::select(sopa2,minimum_nights,number_of_reviews,review_scores_value,calculated_host_listings_count,bedrooms,reviews_per_month,beds,accommodates,availability_30,availability_60,availability_90,instant_bookable, Distancia_Centro,Distancia_Norte,Distancia_Sur,tv_ports,phone_ports,Vecinos,Piso,ventanas,logdist_bank)
+    
+    #Variable instant_bookable:
+    X$instant_bookable<-as.character(X$instant_bookable)
+    X$instant_bookable[X$instant_bookable=="t" ]<-"1"
+    X$instant_bookable[X$instant_bookable=="f" ]<-"0"
+    X$instant_bookable<-as.numeric(as.character(X$instant_bookable))
+
+    Intercept<-rep(1,nrow(X))
+    X<-cbind(Intercept,X)
+    
+    fitt<-solve(as.matrix(diag(nrow(X))-(as.numeric(modelo_SAR$rho)*nb4)))
+    fitt2<-as.matrix(X) %*% as.matrix(modelo_SAR$coefficients)
+    fit_final<-fitt %*% fitt2
+    
+    resid<-sopa2$logprice-as.numeric(fit_final)
+    resid_puros<-as.numeric(as.matrix(solve(fitt)) %*% as.matrix(resid))
+    
+    #Vamos a calcular el R2 de la prediccion
+    rss <- sum(resid_puros ^ 2)
+    tss <- sum((sopa2$logprice - mean(sopa2$logprice)) ^ 2) ## total sum of squares
+    rsq <- 1 - rss/tss
+    #print(rsq)
+  }
+  medias[x]<-mean(rsq)
+}
+print("Posición:")
+quantile(medias)
+print(paste("Centralización:", mean(medias)))
+```
+
+Obtenemos los estadísticos de posición y centralización para $R^2$. Esto nos permite establecer que la bondad de nuestro modelo SAR es, en promedio, de $0.3758$, con un valor mínimo de $0.3546$ y un valor máximo de $0.3950$. Concluimos que nuestro modelo será capaz de explicar entre el 35% y el 40% del precio.
+
+# 7. Propón un modelo GWR para estimar los residuos con un cierto suavizado.
+
+Creamos un modelo GWR (Geographically Weighted Regression):
+
+$$ Y_s=\beta_{s1}X_1+\ldots+\beta_{s1}X_p+u $$
+
+En donde se hace una regresión lineal para cada zona geográfica s.
+
+Se combinan las diferentes ecuaciones mediante una matriz W de forma que se pueden resolver los parámetros del modelo:
+
+$$ \beta=(X^tW_sX)^{-1}X^tW_sY $$
+
+Aplicando la correspondientes transformación a los parámetros $\beta$, tendremos diferentes estimadores para cada zona geográfica en la que se ha divido la muestra. Así, se consigue reducir la dependencia espacial en los residuos y tener en cuenta la distancia entre puntos a la hora de predecir.
+
+Lo primero es definir las zonas geográficas en las que dividir la muestra. A partir de los residuos del modelo SEM y de las coordenadas de nuestro conjunto de datos, el algoritmo *gwr.sel* probará con diferentes distancias y decidirá cuál es el ancho ideal:
+
+```{r  size="small",warning=FALSE,message=FALSE}
+#Convierto mi base de datos en base de datos espacial
+tabla$residuos<-modelo_espacial_sem$residuals
+puntos_sp<-tabla
+coordinates(puntos_sp)<- c("longitude","latitude")
+proj4string(puntos_sp) <- CRS("+proj=longlat +datum=WGS84")
+#Obtenemos el mejor BW
+bw <- gwr.sel(residuos~1, data=puntos_sp)
+
+paste("El mejor ancho de banda es:", bw)
+```
+
+
+
+Una vez obtenido el ancho óptimo, ejecutamos la regresión:
+
+```{r  size="small",warning=FALSE,message=FALSE}
+#Modelizamos
+g <- gwr(residuos~1, data=puntos_sp, bandwidth=bw)
+```
+
+Hacemos un test LISA (Local indicators of spatial association):
+
+
+```{r  size="small",warning=FALSE,message=FALSE}
+tabla$intercept<-g$SDF$`(Intercept)`
+pl_pt_2(tabla, tabla$longitude, tabla$latitude, color2 = tabla$intercept, size2=tabla$registo, dd = 10) 
+```
+
+
+Aunque en el mapa se observa una distribución no uniforme de colores, vemos que las diferencias son extremadamente pequeñas. Por lo tanto, concluimos que este modelo también es capaz de romper la dependencia espacial observada en los modelos GLM.

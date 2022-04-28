@@ -1,0 +1,370 @@
+---
+title: "M5_AI1_SantamariaFabio"
+author: "Fabio Santamaría"
+date: "7/5/2021"
+urlcolor: blue
+output:
+  word_document:  default
+  pdf_document:   default
+  epuRate::epurate:
+    toc:             TRUE
+    number_sections: FALSE
+    code_folding:    "show"
+  html_document: 
+    theme:        cosmo 
+    highlight:    tango 
+    toc:          true
+    toc_float:    true
+    code_folding: show
+---
+
+<style>
+body {
+text-align: justify}
+</style>
+
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+source("Functions.R")
+```
+
+
+# Carga de datos y librerias:
+```{r}
+library(pander)
+library(car)
+data(Salaries)
+head(Salaries)
+```
+
+
+# 1. Propón la regresión para explicar el salario a través de los años de servicio y los años desde el doctorado. Justifica si era lo esperado o no y si difiere justificar la razón de dicho diferimiento. Obtén la suma de residuos al cuadrado, el coeficiente de determinación y el coeficiente de determinación corregido del modelo.
+
+Esperamos que el salario sea proporcional a la experiencia, y por tanto veamos una correlación positiva con los años de servicio y los años desde el doctorado. No obstante, también puede haber otras variables que expliquen parte del salario.
+
+Realizamos el modelo que nos piden, tratar de explicar los salarios en función de las variables años de servicio y los años desde el doctorado:
+
+```{r}
+formula1<-as.formula('salary~yrs.since.phd+yrs.service')
+
+modelo1 <- lm(formula1, data=Salaries)
+pander(summary(modelo1))
+```
+
+Como vemos, el modelo tiene un $R^2$ y un $R^2$ ajustado bajos, de 0.1883 y 0.1842 respectivamente. Ya podemos concluir que de esta forma no somos capaces de modelizar adecuadamente los datos, ya que no podemos explicar ni el 20% del salario usando estas dos variables. Por otro lado, el salario en nuestro modelo es proporcional a los años desde el doctorado, ya que la pendiente es positiva, e inversamente proporcional a los años de servicio. Esto choca con nuestra hipótesis inicial, donde en un primer momento esperábamos obtener una proporcionalidad directa para ambas variables.
+
+
+Para ver por qué nuestro modelo no es capaz de ajustar los datos, veamos los supuestos que se tienen que cumplir en el modelo lineal: 
+
+1. Estamos asumiendo que hay una relación lineal entre las variables explicativas y la variable explicada. Nuestra hipótesis inicial es que el salario fuese proporcional a ambas variables.
+2. No puede haber colinealidad perfecta entre nuestras variables explicativas, puesto que hará que el problema no pueda resolverse.
+3. Asumimos que la muestra es independiente, por lo tanto, que no hay relación entre los registros de nuestra variable respuesta. Así, los residuos de nuestro modelo no pueden estar autocorrelados.
+4. El valor esperado de la media de los residuos debe ser cero. En nuestro caso, comprobaremos que la media sea muy pequeña comparado con los residuos en si.
+5. Asumimos, también, que no hay relación entre los errores de mi modelo y las variables explicativas, es decir, se cumple la condición de homocedasticidad.
+
+Para comprobar el punto 1, pintamos el salario respecto a cada variable:
+
+```{r}
+plot(Salaries$salary~Salaries$yrs.since.phd,
+ main="Salarios vs Años desde el doctorado",
+ xlab="Años desde el doctorado", ylab="Salario")
+```
+```{r}
+plot(Salaries$salary~Salaries$yrs.service,
+ main="Salarios vs Años de servicio ",
+ xlab="Años de servicio", ylab="Salario")
+```
+
+No se observa una tendencia clara lineal. Además, podemos realizar histogramas para cada variable y representar el salario para cada intervalo:
+
+```{r}
+options(dplyr.summarise.inform = FALSE)
+pr<-Hist(Salaries, response = Salaries$salary, predicted = 0, var = Salaries$yrs.since.phd, n=3, breaks = 10)
+plot(pr)
+```
+
+
+```{r}
+options(dplyr.summarise.inform = FALSE)
+pr<-Hist(Salaries,response = Salaries$salary, predicted = 0,var = Salaries$yrs.service,n=4,breaks = 10)
+plot(pr)
+```
+
+Como vemos, la variable *Años de Servicio* presenta una distribución sesgada hacia la izquierda. En *años desde el doctorado* observamos también esto pero en menor medida. Esto nos podría indicar que necesitamos realizar una transformación de los datos, de forma que los intervalos queden más equilibrados.
+
+2. Correlación entre variables explicativas:
+
+```{r}
+tabla <- dplyr::select(Salaries,yrs.since.phd,yrs.service)
+
+cr <- cor(tabla, use="complete.obs")
+ggcorrplot(cr, 
+           hc.order = TRUE, 
+           type = "lower",
+           lab = TRUE)
+```
+
+Como vemos, ambas variables están altamente correlacionadas. Esto nos indica que quizás debamos prescindir de una de ellas. Esto podría explicar por qué los signos de la pendiente *yrs.service* no se corresponde con lo esperado como veremos más adelante.
+
+
+3. Realizamos el test de Autocorrelación para saber si los residuos son independientes entre sí:
+
+```{r}
+plot(modelo1$resid~Salaries$salary[order(Salaries$salary)],
+ main="Salarios x Residuos",
+ xlab="Salarios", ylab="Residuos")
+abline(h=0,lty=2)
+
+print(dwtest(modelo1))
+```
+
+Como vemos, los residuos no se distribuyen uniformemente a lo largo de la variable Salarios. Además, el Durbin-Watson test
+nos indica que la hipótesis de que no existe autocorrelación no puede ser rechazada. Esto está relacionado con que las variables explicativas no tienen una distribución uniforme.
+
+
+4. Analizamos la distribución de los residuos:
+
+
+```{r}
+hist(modelo1$resid, main="Histograma de residuos", ylab="Residuos")
+#q-qPlit
+qqnorm(modelo1$resid)
+qqline(modelo1$resid)
+```
+
+Observamos que los residuos tienen una distribución aproximadamente normal. Calculamos la media:
+
+
+```{r}
+mean(modelo1$resid)
+```
+Vemos que la media es unos 18 órdenes de magnitud inferior a la escala del q-q plot (la cual va de -100.000 a 100.000). Por lo tanto, consideramos que la esperanza matemática de la media de los residuos es compatible con 0.
+
+
+5. Realizamos el test de homocedasticidad para ver si los residuos tienen varianza constante:
+
+
+```{r }
+plot(modelo1$resid~predict(modelo1,Salaries),
+ main="Salarios Estimados x Residuos",
+ xlab="Salarios Estimados", ylab="Residuos")
+abline(h=0,lty=2)
+```
+
+De nuevo, no se observa una distribución uniforme de los residuos. Realizamos el test Breusch-Pagan:
+
+
+```{r}
+bptest(modelo1)
+```
+Podemos rechazar la hipótesis nula en la que se supone la homocedasticidad del modelo. Por lo tanto, los residuos no son homocedásticos.
+
+
+Resumimos los problemas:
+
+* No parece haber una relación lineal entre las variables.
+* Una de las variables explicativas presenta una cola clara para valores pequeños. Esto es síntoma de que la variable requiere una transformación.
+* Las dos variables explicativas están muy correlacionadas entre sí.
+* Existe autocorrelación.
+* Existe heteroasticidad.
+
+Todos los motivos anteriores explican por qué la bondad del modelo es tan baja.
+
+Por otro lado, es posible explicar por qué el parámetro de *yrs.service* es negativo, contrariando a nuestra intuición. Como hemos visto, hay una alta colinealidad entre las variables, lo que hace que nos planteemos eliminar una de ellas. Probemos a usar solo *yrs.service*:
+
+
+```{r}
+formula1<-as.formula('salary~yrs.service')
+
+modelo1oneVar <- lm(formula1, data=Salaries)
+pander(summary(modelo1oneVar))
+```
+
+El ajuste sale peor, pero la pendiente es positiva, tal y como esperábamos. Concluimos que el signo negativo obtenido al principio es debido a la introducción de la variable *yrs.since.phd* la cual tiene una una correlación muy alta con *yrs.service*.
+
+Nos falta calcular la suma de errores al cuadrado. Esto puede hacerse con la función *anova*:
+
+```{r}
+anova(modelo1)
+```
+
+Vemos que la suma de errores al cuadrado es $2.9487 \times 10 ^ {11}$ unidades monetarias al cuadrado en las que se mide el salario.
+
+# 2. Incluye el género en el modelo. Valora la nueva suma de residuos al cuadrado.
+
+Análogamente al ejercicio anterior:
+
+```{r}
+formula2<-as.formula('salary~yrs.since.phd+yrs.service+sex')
+
+modelo2 <- lm(formula2, data=Salaries)
+pander(summary(modelo2))
+```
+```{r}
+anova(modelo2)
+```
+
+Vemos que la suma de residuos al cuadrado es ligeramente menor, $2.9242 \times 10^{11}$, que el caso donde no estábamos considerando la variable género.
+
+# 3 Justifica, a través del coeficiente de determinación corregido, si el género es una variable a tener en cuenta para mejorar el modelo de predicción del salario.
+
+El coeficiente de determinación corregido penaliza la inclusión de variables explicativas en el modelo. Puesto que este coeficiente se ha incrementado al introducir la variable género, pasando de 0.1842 para el primer modelo a 0.189, concluimos que añadir la variable ha mejorado levemente el modelo. Si optamos por quedarnos con modelo sencillo, podríamos prescindir de la variable *sex*. 
+
+Como vemos, la función *lm* ha entendido que la variable *sex* es dicotómica y ha tomado uno de sus valores como variable, en este caso la variable *sexMale* representa con *1* el valor *Male* y con *0* el valor *Female*:
+
+```{r}
+modelo2
+```
+
+
+El coeficiente asociado a esta variable explicativa es positivo, por lo que vemos que ser hombre contribuye positivamente a la percepción de un salario más alto.
+
+# 4 Indica cómo incrementa el salario ante una variación en los años de servicio.
+
+```{r}
+modelo1$coefficients[3]
+```
+```{r}
+modelo2$coefficients[3]
+```
+Para ambos modelos vemos que hay una relación inversamente proporcional entre los años de servicio y el salario. Por cada año de servicio, el modelo 1 predice que cobrarán aproximadamente 629 unidades monetarias menos, mientras que el modelo 2 pronostica que se cobrarán aproximadamente 649 unidades monetarias menos. No obstante, este dato tiene incertidumbre. Para calcularla, usamos la función *confint*:
+
+```{r}
+confint(modelo1)
+```
+De esta forma, podemos estar seguros a un 95% de que el salario decrecerá entre -1129 y -128 unidades monetarias por cada año de servicio.
+
+```{r}
+confint(modelo2)
+```
+Lo mismo concluimos para el modelo 2, con un 95% de que el salario decrecerá entre -1149 y -150 unidades monetarias por cada año de servicio.
+
+# 5 Indica cómo afecta a las betas del modelo si dividimos el salario por mil para expresarlo en miles.
+
+```{r}
+formula3<-as.formula('salary / 1000~yrs.since.phd+yrs.service+sex')
+
+modelo3 <- lm(formula3, data=Salaries)
+pander(summary(modelo3))
+```
+
+Al estar trabajando con un análisis lineal, hacer una transformación lineal sobre la variable exógena transforma de la misma forma los parámetros de nuestro modelo. Por lo tanto, tal y como vemos, todas las cantidades expresadas en unidades monetarias: las pendientes y el intercepto, el error, etc. quedan divididos por el factor 1000. Esta transformación particular no afecta a la interpretación del modelo, mencionada en el ejercicio anterior, ni a la bondad del ajuste.
+
+# 6 Con el modelo anterior, teniendo en cuenta años de servicio y años desde el doctorado, realiza el mismo modelo, pero con el logaritmo neperiano del salario. Indica si se mantienen los signos de las betas obtenidas. 
+
+```{r}
+formula4<-as.formula('log(salary)~yrs.since.phd+yrs.service')
+
+modelo4 <- lm(formula4, data=Salaries)
+pander(summary(modelo4))
+```
+
+En este caso, la transformación logarítmica no es lineal y por tanto los parámetros del ajuste cambian no pudiendo mantener la interpretación original del modelo. Observamos que, en este caso, las pendientes y el intercepto no cambian de signo.
+
+Vemos que el $R^2$ mejora. Analicemos la posible causa de esta mejora:
+
+Si hacemos un histograma de la variable,
+
+```{r}
+options(dplyr.summarise.inform = FALSE)
+pr<-Hist(Salaries,response = Salaries$salary, predicted = 0,var = Salaries$salary,n=6,breaks = 10)
+plot(pr)
+```
+
+vemos que la distribución de la variable no es uniforme, habiendo más valores para el tercer intervalo y muy pocos a intervalos situados a la derecha. Si realizamos la transformación que propone el ejercicio,
+
+
+```{r}
+options(dplyr.summarise.inform = FALSE)
+pr<-Hist(Salaries,response = log(Salaries$salary), predicted = 0,var = log(Salaries$salary),n=6,breaks = 10)
+plot(pr)
+```
+
+observamos que esta distribución se vuelve más uniforme, motivo por el cual la regresión lineal mejora.
+
+
+# 7 Indica cómo incrementa el salario ante una variación, en los años de servicio en este nuevo modelo.
+
+En este caso, al haber realizado una transformación no lineal de la variable, la proporcionalidad se ve afectada por la escala de la variable Salario. Para ver esto, hagamos uso de las matemáticas. Nuestro modelo es:
+
+$log(y) \approx \beta_0^{'} + \beta_1^{'} x_1 + \beta_2^{'} x_2$
+
+Partimos de un la situación $x_i$: 
+
+$y_i \approx exp(\beta_0^{'} + \beta_1^{'} x_1 + \beta_2^{'} x_{2i})$
+
+Supongamos un incremento, de forma que $x_j > x_i$, entonces: 
+
+$y_j \approx exp(\beta_0^{'} + \beta_1^{'} x_1 + \beta_2^{'} x_{2j})$
+
+Restando ambas expresiones:
+
+$y_j - y_i \approx exp(\beta_0^{'} + \beta_1^{'} x_1 + \beta_2^{'} x_{2i}) (exp(\beta_2^{'} x_{2j} - \beta_2^{'} x_{2i}) - 1)$
+
+Simplificando:
+
+$\frac{y_j - y_i}{y_i} \approx exp(\beta_2^{'} (x_j - x_i) ) - 1$
+
+Sabemos que para *yrs.service* la pendiente es negativa. Por tanto, un incremento en $x_2$ ($x_j > x_i$) producirá un decremento en $y$, ya que $y_i > 0$ siempre. Pero la relación entre ambos incrementos no será siempre la misma, sino que dependerá del valor de partida $y_i$.
+
+# 8 Utilizando un modelo de regresión lineal (lm), realiza una modelización correcta del salario (utilizando las variables que desees de la base de datos) y presenta los resultados argumentando, desde tu conocimiento, las razones por las que eliges dicho modelo.
+
+Como ya vimos en el primer ejercicio, el modelo propuesto presenta muchos problemas. Para tratar de crear uno que se ajuste mejor, vamos a implementar los métodos de selección *stepwise* tipo *forward* y tipo *backward*:
+
+
+Con la fórmula completa, creamos el modelo completo y el vacío:
+```{r }
+formula_completa<-as.formula('salary~yrs.since.phd+yrs.service+rank+discipline+sex')
+modelo_completo<-glm(formula = formula_completa ,data = Salaries, family = gaussian)
+modelo_vacio<-glm(formula = salary~1, data = Salaries, family = gaussian)
+```
+
+El completo será el punto de partida del método *backward*:
+  
+```{r }
+backward<-stepAIC(modelo_completo,trace=FALSE,direction="backward")
+backward$anova
+```
+
+Del vacío partirá el método *forward*:
+
+```{r }
+forward<-stepAIC(modelo_vacio,trace=FALSE,direction="forward",scope=formula_completa)
+forward$anova
+```
+
+El método *backward* nos propone que usemos las variables *yrs.since.phd*, *yrs.service*, *rank*, *discipline* mientras que el método forward recomienda *rank* y *discipline*. Esta discrepancia entre ambos métodos se debe al orden en el cual se analizan los modelos. 
+
+Creamos ahora los modelos propuestos:
+
+```{r}
+formulaBackward<-as.formula('salary~yrs.since.phd + yrs.service + rank + discipline')
+
+modeloBackward <- lm(formulaBackward, data=Salaries)
+pander(summary(modeloBackward))
+```
+
+```{r}
+formulaForward<-as.formula('salary~rank + discipline')
+
+modeloForward <- lm(formulaForward, data=Salaries)
+pander(summary(modeloForward))
+```
+
+Como vemos, ambos modelos son significativamente mejores que nuestro primer modelo, el cual no llegaba a explicar ni el 20% del salario. El *backward* es capaz de explicar 45.25% mientra que el *forward* llega a explicar 44.5%. Debido a que el $R^2$ de ambos es muy parecido, si tuviésemos que elegir uno de ellos, elegiríamos el que menos variables presenta, es decir, el modelo *forward*. Además, este modelo no contiene las variables *yrs.since.phd* ni *yrs.service*, las cuales presentaban una colinealidad alta, uno de los problemas del modelo original.
+
+Del modelo *forward* podemos que todos los parámetros son positivos, indicando una proporcionalidad directa entre las variables explicativas y el salario. Sus valores,
+
+```{r}
+modeloForward
+```
+
+junto con los intervalos de confianza,
+
+```{r}
+confint(modeloForward)
+```
+nos da información sobre cómo afecta cada variable al salario. Por ejemplo, de acuerdo al modelo, tener un rango de profesor asociado incrementa el salario en *13762* unidades monetarias. No obstante, este dato tiene incertidumbre. Gracias a la función *confint*  podemos asegurar con una confianza del 95% que el incremento estará entre *5974* y *21548* unidades monetarias.

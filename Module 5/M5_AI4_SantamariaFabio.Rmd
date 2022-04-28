@@ -1,0 +1,485 @@
+---
+title: "M5_AI4_SantamariaFabio"
+author: "Fabio Santamaría"
+date: "31/5/2021"
+urlcolor: blue
+output:
+  word_document:  default
+  pdf_document:   default
+  epuRate::epurate:
+    toc:             TRUE
+    number_sections: FALSE
+    code_folding:    "show"
+  html_document: 
+    theme:        cosmo 
+    highlight:    tango 
+    toc:          true
+    toc_float:    true
+    code_folding: show
+---
+
+<style>
+body {
+text-align: justify}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, tidy = TRUE)
+library(knitr)
+library(pander)
+library(kableExtra)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(ggcorrplot)
+suppressPackageStartupMessages(library(tidyverse))
+library(reticulate)
+require(effects)
+library(spatialreg)
+source("Functions.R")
+```
+
+Dentro del paquete de R “MPV”, se encuentra una base de datos de gasto en combustible de diferentes coches con una serie de características:
+
+- y: Miles/gallon. 
+- x1: Displacement (cubic in). 
+- x2: Horsepower (ft-lb). 
+- x3: Torque (ft-lb). 
+- x4: Compression ratio. 
+- x5: Rear axle ratio. 
+- x6: Carburetor (barrels). 
+- x7: No. of transmission speeds. 
+- x8: Overall length (in). 
+- x9: Width (in). 
+- x10: Weight (lb). 
+- x11: Type of transmission (1=automatic, 0=manual).
+
+```{r  size="small",warning=FALSE,message=FALSE}
+library(MPV)
+df <- table.b3[-c(23,25),]
+```
+
+```{r  size="small",warning=FALSE,message=FALSE}
+head(df)
+```
+
+# 1. Proponed una especificación que a vuestra intuición sea un buen modelo para explicar la variable y en base a las x que tenemos anteriormente. 
+
+Para comenzar, hacemos un modelo de regresión lineal con todas las variables disponibles: 
+
+```{r  size="small",warning=FALSE,message=FALSE}
+formula_completa = as.formula("y~x1+x2+x3+x4+x5+x6+x7+x8+x9+x10+x11")
+
+modelo_lineal_completo<-lm(formula=formula_completa, data=df)
+
+summary(modelo_lineal_completo)
+```
+
+Como vemos, no hay ninguna variable significativa. Por lo tanto, se está incumpliendo una o varias de las asunciones fundamentales de la regresión lineal. Recordemos cuales son:
+
+- Relación lineal entre la variable dependiente y las variables explicativas.
+- Independencia entre las variables explicativas.
+- Residuos distribuidos de forma estándar y con media 0, homocedásticos y no autocorrelados.
+
+Comprobamos la linealidad y/x representando la variable dependiente frente a un histograma de cada una de las variables explicativas: 
+
+```{r  size="small",warning=FALSE,message=FALSE}
+for (i in 1:ncol(df)){
+pr<-Hist(df,response = df[,1],predicted = 0,var = df[,i],n=i,breaks = 10)
+plot(pr)
+}
+```
+
+Como vemos, todas ellas presentan una relación aproximadamente lineal con la variable dependiente, no siendo necesario aplicar ninguna transformación.
+
+Pasamos a comprobar que las variables explicativas deben ser independientes entre sí. Para corroborarlo, estudiamos la correlaciones que hay entre ellas:
+
+```{r, fig.heigth=10, fig.width=12}
+cr <- cor(df, use="complete.obs")
+ggcorrplot(cr, hc.order = TRUE,type = "lower",lab = TRUE)
+```
+
+Como vemos, la variable x1 está muy correlacionada con x2, x3 y x10. De la misma forma, x8 con x9 y x7 con x11. Por lo tanto, hemos encontrado una violación clara de nuestros supuestos iniciales en este primer modelo.
+
+Con el fin de obtener un modelo que cumpla los supuestos, analizamos las variables. Consultando el diccionario de datos nos damos cuenta que pueden ser clasificadas en grupos:
+
+- Variables relacionadas con la potencia del motor: x1, x2, x3
+
+- Otras características del motor: x4, x5, x6
+
+- Transmisión: x7, x11
+
+- Dimensiones y peso: x8, x9, x10.
+
+En el primer grupo, esperamos que, tal y como ocurre, todas ellas estén muy correlacionadas entre sí, ya que todas contribuyen positivamente a la potencia. En el segundo grupo, no vemos que haya relación entre ellas. En el tercero, sí esperamos una correlación inversa entre tener un mayor número de marchas y que la transmisión sea automática. En el cuarto, el peso y las dos dimensiones deberían de tener una relación positiva entre sí.
+
+Nuestro análisis de correlaciones también nos dice cómo de fuerte es la relación entre las variables explicativas y la variable dependiente. En nuestro caso, vemos que las millas/galón está fuertemente relacionada con las variables del grupo 1 y el grupo 4. Esto coincide con nuestra intuición, ya que fundamentalmente esperamos que la distancia en millas por galón sea inversamente proporcional a la potencia del motor, y a las dimensiones y el peso. De ambos grupos escogemos una variable representativa, en este caso, x1 y x4. Realizamos otra vez una regresión lineal simple:
+
+```{r  size="small",warning=FALSE,message=FALSE}
+formula_simple_1 = as.formula("y~x1+x4")
+
+modelo_lineal_simple_1<-lm(formula=formula_simple_1 ,data=df)
+
+summary(modelo_lineal_simple_1)
+```
+
+Como vemos, la variable x1 es muy significativa y su pendiente es negativa, tal y como esperábamos. Por su lado, x4 no alcanza el grado de significación suficiente. El $R^2$ del modelo ha mejorado pasando del 0.73 a 0.76.
+
+Ya que x4 no contribuye lo suficiente decidimos eliminarla, quedándonos solo con x1:
+
+```{r  size="small",warning=FALSE,message=FALSE}
+formula_simple_2 = as.formula("y~x1")
+
+modelo_lineal_simple_2<-lm(formula=formula_simple_2 ,data=df)
+
+summary(modelo_lineal_simple_2)
+```
+
+Como vemos, el $R^2$ ajustado ha empeorado ligeramente en favor de tener un modelo con menos variables.
+
+Tal y como hemos hecho antes con el primer modelo, debemos validar que se cumplen los axiomas en los que se basa la regresión lineal que estamos haciendo. Tanto la linealidad como la correlación ya las hemos tratado y las conclusiones extraídas son suficientes para ver que estos dos supuestos se cumplen. Pasamos pues a analizar los residuos del modelo. Tenemos que comprobar que los residuos están distribuidos de forma estándar, su media es 0, son homocedásticos y no están autocorrelados.
+
+
+- Distribución de los residuos:
+
+```{r  size="small",warning=FALSE,message=FALSE}
+plot(modelo_lineal_simple_2,2)
+```
+
+A simple vista, corroboramos que siguen una distribución normal. Además, aunque nuestra muestra es pequeña, ya que solo contamos con 30 registros, realizamos el test de Jarque Bera:
+
+```{r  size="small",warning=FALSE,message=FALSE}
+jarqueberaTest(modelo_lineal_simple_2$resid)
+```
+
+Con pocos registros, el test podría dar un falso positivo, es decir, rechazar la hipótesis nula cuando realmente es cierta. Este no es nuestro caso, ya que el p-value = 0.82 >> 0.05 y no podemos rechazar la $H_0$. Por lo tanto, aun siendo la muestra muy pequeña, podemos concluir con el test que los residuos siguen una distribución normal.
+
+
+- Media:
+
+```{r  size="small",warning=FALSE,message=FALSE}
+rango = (max(modelo_lineal_simple_2$resid) - min(modelo_lineal_simple_2$resid))/2
+print(rango)
+mean(modelo_lineal_simple_2$resid)
+```
+Teniendo en cuenta que el rango en el cual fluctúan los valores de los residuos es de orden 1 y la media de ellos es de orden -17, concluimos que la media es compatible con 0, validando así otro supuesto requerido. 
+
+- Autocorrelación:
+
+Realizamos el test Durbin-Watson:
+
+```{r  size="small",warning=FALSE,message=FALSE}
+dwtest(modelo_lineal_simple_2)
+```
+Dado que el p-value = 0.205 >> 0.05 no podemos rechazar la hipótesis nula y por tanto concluimos que los residuos no presentan autocorrelación.
+
+- Heterocedasticidad:
+
+Usamos el test de studentized Breusch-Pagan
+
+```{r }
+bptest(modelo_lineal_simple_2)
+```
+En este caso vemos que hay heterocedasticidad. Con lo cual, **no podemos validar nuestro modelo completamente**. Uno de los posibles problemas es que estemos simplificando demasiado y necesitemos más variables. Nuestra intuición no es suficiente a la hora de crear un modelo que cumpla todos los requisitos necesarios. Precisamente por esto, en el siguiente ejercicio, usaremos las herramientas stepwise, las cuales nos ayudarán a escoger un modelo que cumpla todos los requisitos.
+
+# 2. Utilizar la técnica STEPWISE para elegir el modelo de tal forma que minimicemos el BIC. 
+
+Utilizamos la técnica stepwise para minimizar el BIC (Bayesian Information Criterion) de forma que nos permita seleccionar un modelo apropiado.
+
+- Probamos con el método forward:
+
+```{r }
+modelo_vacio<-glm(formula =y~1,data = df,family=gaussian)
+forward<-stepAIC(modelo_vacio,
+                  trace=FALSE,
+                  direction="forward",
+                  scope=formula_completa,
+                  k=log(nrow(df))
+                 ) #con el log sacamos el BIC
+forward$anova
+```
+
+Obtenemos el mismo resultado que nuestra propuesta elaborada en el ejercicio anterior. Como ya hemos visto, este modelo presenta heterocedasticidad en sus residuos.
+
+- Probemos con el método backward:
+
+```{r }
+backward<-stepAIC(modelo_lineal_completo,
+                  trace=FALSE,
+                  direction="backward",
+                  k=log(nrow(df))
+                  ) #con el log sacamos el BIC
+backward$anova
+```
+
+En este caso, nos recomienda hacer un modelo con tres variables x5, x8 y x10. Si recordamos el análisis hecho en el ejercicio anterior, estas variables pertenecen a diferentes grupos de nuestro análisis, y por tanto es de esperar, y de hecho se observa, que no haya mucha colinealidad entre ellas. 
+
+- Probemos, por último, con el método both:
+
+```{r }
+backward<-stepAIC(modelo_lineal_completo,
+                  trace=FALSE,
+                  direction="both",
+                  k=log(nrow(df))) #con el log sacamos el BIC
+backward$anova
+```
+
+Obtenemos el mismo resultado que con el método backward.
+
+Validemos ahora este modelo. Como ya hemos visto en el ejercicio anterior, con respecto a las variables, observamos que hay una relación lineal entre la variable dependiente y las variables explicativas. Además, también vimos que estas variables, x5, x8 y x10, no presentan una gran correlación entre sí. Procedamos pues a crear el modelo y examinar sus residuos:
+
+```{r  size="small",warning=FALSE,message=FALSE}
+formula_simple_3 = as.formula("y~x10+x5+x8")
+
+modelo_lineal_simple_3<-lm(formula=formula_simple_3 ,data=df)
+
+summary(modelo_lineal_simple_3)
+```
+
+Obtenemos un $R^2$ ajustado de 0.78, el más alto de todos. Vemos que tanto x10 como x8 son significativas al 0.05 y que x5 lo es al 0.1. Analicemos los residuos:
+
+- Distribución de los residuos:
+
+```{r  size="small",warning=FALSE,message=FALSE}
+plot(modelo_lineal_simple_3,2)
+```
+
+A simple vista, corroboramos que siguen una distribución normal. Además, realizamos el test de Jarque Bera:
+
+```{r  size="small",warning=FALSE,message=FALSE}
+jarqueberaTest(modelo_lineal_simple_3$resid)
+```
+
+No podemos rechazar la $H_0$, por lo tanto concluimos que los residuos siguen una distribución normal. Esta conclusión es firme aunque la muestra sea muy pequeña (solo tenemos 30 registros), ya que con pocos registros el test tiende a dar un falso positivo, indicando que debemos rechazar la hipótesis nula cuando en realidad es cierta. Como este no es el caso, el resultado del test es fiable para concluir que los residuos siguen una distribución normal.
+
+
+- Media:
+
+```{r  size="small",warning=FALSE,message=FALSE}
+rango = (max(modelo_lineal_simple_3$resid) - min(modelo_lineal_simple_3$resid))/2
+print(rango)
+mean(modelo_lineal_simple_3$resid)
+```
+Teniendo en cuenta que el rango en el cual fluctúan los valores de los residuos es de orden 1 y la media de ellos es de orden -16, concluimos que la media es compatible con 0. 
+
+- Autocorrelación:
+
+Realizamos el test Durbin-Watson:
+
+```{r  size="small",warning=FALSE,message=FALSE}
+dwtest(modelo_lineal_simple_3)
+```
+Dado que el  p-value = 0.6251 >> 0.05 no podemos rechazar la hipótesis nula y por tanto concluimos que los residuos no presentan autocorrelación.
+
+- Heterocedasticidad:
+
+Usamos el test de studentized Breusch-Pagan
+
+```{r }
+bptest(modelo_lineal_simple_3)
+```
+**Hemos conseguido romper la heterocedasticidad. Observamos que todos los supuestos se cumplen en este modelo.**
+
+Además, vemos que el problema del modelo *modelo_lineal_simple_2* del ejercicio anterior, el cual cumplía todos los supuestos excepto la homocedasticidad de los residuos, era demasiado simple y no podía tener en cuenta correctamente la variabilidad de nuestra variable dependiente.
+
+# 3. Programad vuestro propio STEPWISE (Backward o Forward) para decidir cuál sería el mejor modelo minimizando la siguiente función:    
+
+$$U = \frac{((1/n) \Sigma(y - \hat{y})^2)^{0.5}}{((1/n) \Sigma(y^2))^{0.5} + ((1/n) \Sigma(\hat{y}^2))^{0.5} } + 0.05 \times \text{ Número de Variables}$$
+
+Programamos un stepwise forward donde tratamos de evaluar la función para los diferentes modelos y luego escoger aquellos que la minimizan:
+
+```{r  size="small",warning=FALSE,message=FALSE}
+#forward:
+customStepWiseForward <- function(df, alpha = 0.05) {
+
+  n <- nrow(df)
+  k <- ncol(df) - 1
+  y <- df$y
+  var_names <- colnames(dplyr::select(df,-y))
+  previous_var_names <- rep("",length = length(var_names) )
+  
+  #frame to return
+  formula_min <- "" 
+  u_min <- c(0)
+  model <- data.frame(formula_min,u_min)
+  
+  #logic
+  for (i in 1:k) {
+    n_col <- length(var_names)
+    U <- c(0)
+    for (k_var in 1:n_col){
+      not_fixed_var <- paste0(var_names[k_var], collapse="+")
+      
+      formula_str <- not_fixed_var
+      if (formula_min!="") {
+        formula_str <- paste(formula_min, not_fixed_var, sep = "+")
+      }
+      
+      formula_step <- as.formula(paste0("y~",formula_str))
+  
+      lm_i <- glm(formula=formula_step, data=df, family = gaussian)
+    
+      y_predicted <- predict(lm_i,df,type="response")
+    
+      k_num <- length(lm_i$coefficients) - 1 
+  
+      U[k_var] <- (sum((y - y_predicted)**2))**0.5 / ((sum(y**2))**0.5 + (sum(y_predicted**2))**0.5 ) + alpha * k_num
+  
+      #Para poder comprobar que el código funciona, se puede calcular el BIC o AIC y compararlo con el cálculo obtenido con la función       stepAIC y así ver que los resultados son idénticos.
+      #U[k_var] <- BIC(lm_i)   
+      #U[k_var] <- AIC(lm_i)
+      
+    }
+  
+    #update model
+    min_u_index <- which.min(U)
+    previous_var_names[i] <- var_names[min_u_index]
+    var_names <- var_names[-min_u_index]
+    formula_min <- paste0(previous_var_names[which(previous_var_names!="")], collapse="+")
+    model[i,1] <- formula_min
+    model[i,2] <- U[min_u_index]
+  }
+  #print frame
+  head(model,n = 11L)
+}
+
+customStepWiseForward(df)
+```
+
+Como vemos, este método nos está recomendando que escojamos el modelo cuya única variable explicativa sea x1, tal y como nos ha recomendado el stepwise forward con función BIC usado en el ejercicio anterior. Como ya hemos visto en el ejercicio 1, este modelo presenta heterocedasticidad en sus residuos.
+
+Planteemos el método backward:
+
+
+```{r  size="small",warning=FALSE,message=FALSE}
+#backward:
+library(CombMSC)
+
+customStepWiseBackward <- function(df, alpha = 0.05){
+  n <- nrow(df)
+  k <- ncol(df) - 1
+  y <- df$y
+  var_names <- colnames(dplyr::select(df,-y))
+  previous_var_names <- rep("",length = length(var_names) )
+  
+  #frame to return
+  formula_min <- "" 
+  u_min <- c(0)
+  model <- data.frame(formula_min,u_min)
+  
+  #logic
+  for (i in 1:k) {
+    n_col <- length(var_names)
+    if (k - i < 1) {
+      break;
+    }
+    formulas <- apply(subsets(n_col, k - i, var_names), 1, function(x){paste0(x, collapse="+")})
+    U <- c(0)
+    j <- 1
+    formulas_strs <- rep("",length = length(formulas) )  
+    for (formula_str in formulas){
+  
+      formula_str_final <- paste0("y~",formula_str)
+      
+      formula_step <- as.formula(formula_str_final)
+      
+      formulas_strs[j] <- formula_str_final
+      
+      lm_i <- lm(formula=formula_step, data=df
+                 #,family = gaussian
+                 )
+    
+      y_predicted <- predict(lm_i, df, type="response")
+    
+      k_num <- length(lm_i$coefficients) - 1 
+  
+      U[j] <- (sum((y - y_predicted)**2))**0.5 / ((sum(y**2))**0.5 + (sum(y_predicted**2))**0.5) + alpha * k_num
+      #U[j] <- BIC(lm_i)
+      #U[j] <- AIC(lm_i)
+  
+      j <- j + 1
+    }
+  
+    #update model
+    min_u_index <- which.min(U)
+    var_names <- var_names[-min_u_index]
+    
+    model[i,1] <- formulas_strs[min_u_index] 
+    model[i,2] <- U[min_u_index]
+  }
+  
+  #print frame
+  head(model,n = 11L)
+}
+
+customStepWiseBackward(df)
+```
+
+En este caso, también nos recomienda quedarnos con un modelo cuya única variable explicativa sea x9. Este resultado es diferente al obtenido con la función stepwise del paquete MASS en el ejercicio anterior. La discrepancia se debe a que están resolviendo el problema de optimización para funciones diferentes.
+
+
+# 4. Probad a variar el 0.05 para elegir un modelo según vuestra visión. 
+
+Probamos a variar el valor 0.05 de nuestra función U, de forma que la parametrizamos con $\alpha$:
+
+$$U = \frac{((1/n) \Sigma(y - \hat{y})^2)^{0.5}}{((1/n) \Sigma(y^2))^{0.5} + ((1/n) \Sigma(\hat{y}^2))^{0.5} } + \alpha \times \text{ Número de Variables}$$
+
+Así, cuanto mayor sea el valor de $\alpha$ más se penalizará el número de variables explicativas empleadas en el modelo. Probando con varios valores observamos 3 comportamientos diferentes en la función:
+
+Si $\alpha$ es lo suficientemente pequeño, $\alpha<0.0005$para los métodos forward y backward, los modelos con más variables ajustan mejor, siendo la U una función monótona decreciente con respecto al número de variables explicativas usadas:
+
+```{r  warning=FALSE,message=FALSE}
+#forward:
+customStepWiseForward(df, 0.0005)
+```
+
+```{r  warning=FALSE,message=FALSE}
+#backward:
+customStepWiseBackward(df, 0.0005)
+```
+
+
+Si, por el contrario, $\alpha$ es lo suficientemente grande, $\alpha>0.05$ tanto en el método forward como en el backward, los modelos con menos variables ajustan mejor, siendo la U una función monótona creciente con respecto al número de variables explicativas usadas:
+
+```{r  warning=FALSE,message=FALSE}
+#forward:
+customStepWiseForward(df, 0.05)
+```
+
+```{r  warning=FALSE,message=FALSE}
+#backward:
+customStepWiseBackward(df, 0.05)
+```
+
+Si $\alpha$ tiene un valor intermedio, ni muy grande ni muy pequeño ($\alpha = 0.0015$), los modelos con número intermedio de variables presentan los valores de U más pequeños:
+
+```{r  warning=FALSE,message=FALSE}
+#forward:
+customStepWiseForward(df, 0.0015)
+```
+
+```{r  warning=FALSE,message=FALSE}
+#backward:
+customStepWiseBackward(df, 0.0015)
+```
+
+Por tanto, si $\alpha$ es muy grande corremos el riesgo de seleccionar un modelo con problemas de underfitting, es decir, que no tengan las suficientes variables para ajustar correctamente la variable dependiente. Precisamente esta fue la causa de la heterocedasticidad de los residuos de nuestro modelo en el primer ejercicio.
+
+Por otro lado,  si $\alpha$ es muy pequeña no estamos penalizando la inclusión de variables en nuestro modelo, pudiendo seleccionar modelos con problemas de overfitting. En estos modelos, habría demasiadas variables explicativas, pudiendo haber dependencias entre ellas. De hecho, como vimos en el ejercicio 1, un modelo con todas las variables no es buen modelo, ya que existen correlaciones muy altas entre las variables explicativas.
+
+Por último, con un valor $\alpha$ intermedio, nuestras funciones stepwise seleccionarán modelos con un número de variables intermedio. En nuestro caso, esto es lo óptimo, ya que, como acabamos de recordar, con pocas variables nuestros modelos tienen problemas de heterocedasticidad en los residuos y con muchas, colinealidad en las variables. Por tanto, escoger modelos con 2, 3 o 4 variables, usando un método stepwise, incrementa las posibilidades de que las asunciones del modelo lineal se cumplan y podamos validar así su poder explicativo y predictivo.
+
+# 5. En función de los modelos anteriores, ¿cuál de ellos en el caso de que difieran recomendaríais?
+
+De los modelos que se han analizado en esta actividad, el único que ha cumplido con todos los requisitos exigidos por los supuestos del análisis de regresión lineal ha sido el modelo y ~ x5 + x8 + x10. Además, el $R^2$ ajustado de este modelo es el mejor de todos, con un valor de 0.78. 
+
+En comparación con el resto, como ya vimos, y ~ x1 presenta heterocedasticidad en los residuos e y ~ x1 + x2 + x3 + x4 +x5 + x6 + x7 + x8 + x9 + x10 + x11 presenta colinealidad en las variables explicativas. Escogemos por tanto el modelo 
+
+$$y \approx x5 + x8 + x10 $$
+
+donde 
+
+- y: Miles/gallon.
+- x5: Rear axle ratio. 
+- x8: Overall length (in). 
+- x10: Weight (lb).
